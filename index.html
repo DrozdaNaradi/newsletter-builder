@@ -326,12 +326,17 @@ async function fetchAll(){
   renderPreview();
 }
 
-// ─── FETCH ONE PRODUCT ────────────────────────────────────
-// Claude fetches the product page directly (no CORS — API call goes server-side)
-// and returns name, description, and the EXACT image URL from the page HTML
+// ─── FETCH ONE PRODUCT ──────────────────────────────────────
+// Step 1: allorigins proxy fetches the product page HTML
+// Step 2: regex extracts the Hero image src (works for relative and absolute URLs)
+// Step 3: Claude API generates name + description
 async function fetchOneProduct(i){
   const p = products[i];
   try{
+    // STEP 1: Get image URL from page HTML via proxy
+    p.imgUrl = await getImgFromPage(p.url);
+
+    // STEP 2: Claude generates name + description
     const resp = await fetch(API_URL,{
       method:'POST',
       headers:{
@@ -341,50 +346,64 @@ async function fetchOneProduct(i){
         'anthropic-dangerous-direct-browser-access':'true'
       },
       body: JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:500,
-        tools:[{
-          type:'web_search_20250305',
-          name:'web_search'
-        }],
-        system:`Jsi asistent pro e-shop s nářadím. Dostaneš URL produktu z drozda-naradi.cz.
-Použi web_search pro vyhledání stránky produktu a zjisti:
-1. Přesný název produktu
-2. URL titulní fotky produktu (hledej src atribut obrázku obsahující "fotky92438/fotos" a "Hero_1")
-3. Krátký odborný popisek 1-2 věty česky pro profesionály
-
-Vrať POUZE JSON bez backticks:
-{"name":"název","img":"https://www.drozda-naradi.cz/fotky92438/fotos/...","desc":"popisek"}
-
-Pro img: URL musí začínat https://www.drozda-naradi.cz/fotky92438/fotos/ a obsahovat Hero_1`,
+        model:'claude-haiku-4-5-20251001',
+        max_tokens:200,
+        system:'Vrať POUZE JSON bez backticks: {"name":"obchodní název produktu","desc":"1-2 věty česky pro profesionály"}',
         messages:[{role:'user',content:`URL produktu: ${p.url}`}]
       })
     });
-
     if(!resp.ok) throw new Error('API '+resp.status);
     const data = await resp.json();
-
-    // Extract text from response (may contain tool use blocks)
-    let text = '';
-    for(const block of (data.content||[])){
-      if(block.type==='text') text += block.text;
-    }
-
-    const clean = text.replace(/```json|```/g,'').trim();
-    // Find JSON in response
-    const jsonMatch = clean.match(/\{[^}]+\}/s) || clean.match(/\{[\s\S]+\}/);
-    if(!jsonMatch) throw new Error('No JSON in response');
-
-    const parsed = JSON.parse(jsonMatch[0]);
+    const text = data.content?.find(b=>b.type==='text')?.text||'{}';
+    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
     p.name = parsed.name || slugToName(p.url);
     p.desc = parsed.desc || '';
-    p.imgUrl = parsed.img || '';
     p.status = 'done';
   }catch(e){
-    console.error('fetchOneProduct error:', e);
+    console.error('fetchOneProduct:', e);
     p.name = slugToName(p.url);
     p.status = 'error';
   }
+}
+
+// Fetch page HTML via allorigins proxy and extract Hero image URL
+async function getImgFromPage(productUrl){
+  const base = 'https://www.drozda-naradi.cz';
+  const proxies = [
+    'https://api.allorigins.win/get?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
+  for(const proxy of proxies){
+    try{
+      const r = await fetch(proxy + encodeURIComponent(productUrl), {signal: AbortSignal.timeout(10000)});
+      if(!r.ok) continue;
+      // allorigins returns JSON with .contents, codetabs returns raw HTML
+      let html = '';
+      const ct = r.headers.get('content-type')||'';
+      if(ct.includes('application/json')){
+        const j = await r.json();
+        html = j.contents || '';
+      } else {
+        html = await r.text();
+      }
+      if(!html || html.length < 500) continue;
+
+      // 1. src attribute containing fotky92438/fotos and Hero_1
+      let m = html.match(/src=["']([^"']*fotky92438\/fotos\/[^"']*Hero_1[^"']*)/i);
+      if(m) return m[1].startsWith('http') ? m[1] : base + m[1];
+
+      // 2. og:image meta tag
+      m = html.match(/property=["']og:image["'][^>]*content=["']([^"']+fotky[^"']+)["']/i)
+        || html.match(/content=["']([^"']+fotky[^"']+)["'][^>]*property=["']og:image["']/i);
+      if(m) return m[1].replace(/&amp;/g,'&');
+
+      // 3. Any src with fotky92438/fotos
+      m = html.match(/src=["']([^"']*fotky92438\/fotos\/[^"']+\.(webp|jpg|png))/i);
+      if(m) return m[1].startsWith('http') ? m[1] : base + m[1];
+
+    }catch(e){ console.warn('proxy failed:', proxy, e.message); }
+  }
+  return '';
 }
 
 // ─── DOWNLOAD ALL IMAGES ──────────────────────────────────
