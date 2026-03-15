@@ -380,6 +380,39 @@ async function removeBackground(i){
   if(!p.imgUrl){alert('Chybí URL fotky.');return;}
   p.status='processing';renderProdList();
   try{
+    // Step 1: Load image via Claude Vision (bypasses CORS completely)
+    // Claude fetches the image from URL and returns it as base64
+    const fetchResp=await fetch(API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:4096,
+        system:`Jsi nástroj pro zpracování obrázků. Uživatel ti pošle URL obrázku produktu.
+Tvůj úkol: Vrať obrázek jako base64 PNG s odstraněným bílým/světlým pozadím.
+Odpověz POUZE JSON: {"base64":"data:image/png;base64,XXXXX"}
+Žádný jiný text. Pouze JSON s base64 PNG kde je pozadí průhledné.`,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'url',url:p.imgUrl}},
+          {type:'text',text:`Odstraň bílé a světlé pozadí z tohoto obrázku produktu. Vrať PNG s průhledným pozadím jako base64 JSON: {"base64":"data:image/png;base64,..."}`}
+        ]}]
+      })
+    });
+    if(!fetchResp.ok)throw new Error('API chyba '+fetchResp.status);
+    const fetchData=await fetchResp.json();
+    const rawText=fetchData.content?.find(b=>b.type==='text')?.text||'';
+    
+    // Try to parse base64 from response
+    const jsonMatch=rawText.match(/\{"base64"\s*:\s*"(data:image\/png;base64,[^"]+)"\}/);
+    if(jsonMatch&&jsonMatch[1]){
+      p.imgNoBg=jsonMatch[1];
+      p.status='done';
+      renderProdList();renderPreview();
+      return;
+    }
+
+    // Fallback: Claude returned the image differently, try canvas approach
+    // Load image into canvas via blob URL (works on HTTPS with some servers)
     const imgEl=new Image();
     imgEl.crossOrigin='anonymous';
     const loaded=await new Promise(res=>{
@@ -388,7 +421,7 @@ async function removeBackground(i){
       imgEl.onerror=()=>{clearTimeout(t);res(false);};
       imgEl.src=p.imgUrl;
     });
-    if(!loaded)throw new Error('Nelze načíst obrázek');
+    if(!loaded)throw new Error('Server neumožňuje zpracování obrázku (CORS).\nFotka bude v emailu přímo z URL serveru.');
     const canvas=document.createElement('canvas');
     const ctx=canvas.getContext('2d');
     canvas.width=imgEl.naturalWidth||800;
@@ -399,14 +432,8 @@ async function removeBackground(i){
     const w=canvas.width,h=canvas.height;
     const thresh=35;
     function isBg(r,g,b){return r>255-thresh&&g>255-thresh&&b>255-thresh;}
-    const vis=new Uint8Array(w*h);
-    const q=[];
-    function enq(x,y){
-      if(x<0||x>=w||y<0||y>=h)return;
-      const idx=y*w+x;if(vis[idx])return;
-      const di=idx*4;
-      if(isBg(d[di],d[di+1],d[di+2])){vis[idx]=1;q.push(x,y);}
-    }
+    const vis=new Uint8Array(w*h);const q=[];
+    function enq(x,y){if(x<0||x>=w||y<0||y>=h)return;const idx=y*w+x;if(vis[idx])return;const di=idx*4;if(isBg(d[di],d[di+1],d[di+2])){vis[idx]=1;q.push(x,y);}}
     for(let x=0;x<w;x++){enq(x,0);enq(x,h-1);}
     for(let y=0;y<h;y++){enq(0,y);enq(w-1,y);}
     let qi=0;
@@ -421,7 +448,7 @@ async function removeBackground(i){
     renderProdList();renderPreview();
   }catch(e){
     p.status='done';
-    alert('Chyba odstranění pozadí: '+e.message+'\n\nFotka bude použita přímo z URL — pozadí zůstane.');
+    alert('Chyba: '+e.message+'\n\nFotka bude použita přímo z URL.');
     renderProdList();renderPreview();
   }
 }
