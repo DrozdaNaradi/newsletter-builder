@@ -318,25 +318,38 @@ async function fetchAll(){
   renderPreview();
 }
 
+// Scrape product page via CORS proxy to get real image URL
+async function scrapeProductPage(url){
+  try{
+    const proxyUrl='https://api.allorigins.win/get?url='+encodeURIComponent(url);
+    const resp=await fetch(proxyUrl);
+    if(!resp.ok)throw new Error('proxy fail');
+    const data=await resp.json();
+    const html=data.contents||'';
+    let m=html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+           ||html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    if(m&&m[1]&&m[1].includes('fotky'))return{img:m[1].replace(/&amp;/g,'&')};
+    m=html.match(/(https?:\/\/[^"'\s]+fotky92438\/fotos\/[^"'\s]+Hero_1\.(webp|jpg|png))/i);
+    if(m)return{img:m[1]};
+    m=html.match(/(https?:\/\/[^"'\s]+fotky92438\/fotos\/[^"'\s]+\.(webp|jpg|png))/i);
+    if(m)return{img:m[1]};
+    return{img:''};
+  }catch(e){console.warn('scrape failed:',e);return{img:''};}
+}
+
 async function fetchProduct(i){
   const p=products[i];
   try{
+    const scraped=await scrapeProductPage(p.url);
+    p.imgUrl=scraped.img||'';
     const resp=await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
-        max_tokens:600,
-        system:`Vrať POUZE validní JSON bez backticks.
-Formát: {"name":"název","desc":"popisek","imgCandidates":["url1","url2","url3"]}
-- name: přesný obchodní název produktu Milwaukee nebo jiné značky
-- desc: 1-2 věty odborného popisku česky pro profesionály
-- imgCandidates: 4-5 možných URL fotek z https://www.drozda-naradi.cz/fotky92438/fotos/
-  Vzory: _vyr_NNNNN_SLUG--Hero_1.webp, _vyr_NNNNN_SLUG--Hero_1.jpg, _vyrp11_NNNNN_SLUG--Hero_1.webp, _vyrp13_NNNNN_SLUG--Hero_1.webp
-  Příklady: /milwaukee-m12-fsciwf38-0 → _vyr_17372_M12_FSCIWF38-0--Hero_1.webp
-  /milwaukee-m18-fhaco540-122c → _vyr_51400_milwaukee-m18-fhaco540-122c--Hero_1.webp
-  Dej vždy aspoň 4 varianty s různými prefixy a příponami (.webp i .jpg).`,
-        messages:[{role:'user',content:`URL: ${p.url}`}]
+        max_tokens:300,
+        system:`Vrať POUZE validní JSON bez backticks. Formát: {"name":"název","desc":"popisek"}. name: přesný obchodní název produktu ze slugu URL. desc: 1-2 věty odborného popisku česky pro profesionály.`,
+        messages:[{role:'user',content:`URL produktu: ${p.url}`}]
       })
     });
     if(!resp.ok)throw new Error('API '+resp.status);
@@ -345,8 +358,6 @@ Formát: {"name":"název","desc":"popisek","imgCandidates":["url1","url2","url3"
     const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
     p.name=parsed.name||slugToName(p.url);
     p.desc=parsed.desc||'';
-    const candidates=parsed.imgCandidates||[];
-    p.imgUrl=await tryImageUrls(candidates);
     p.status='done';
   }catch(e){
     console.error(e);
@@ -354,7 +365,6 @@ Formát: {"name":"název","desc":"popisek","imgCandidates":["url1","url2","url3"
     p.status='error';
   }
 }
-
 async function tryImageUrls(urls){
   for(const url of urls){
     if(!url||!url.startsWith('http'))continue;
