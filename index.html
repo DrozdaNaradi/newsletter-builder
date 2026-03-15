@@ -207,6 +207,7 @@ S pozdravem tým Drozda Nářadí.</textarea>
           <input type="file" id="file-upload" multiple accept="image/*" style="display:none" onchange="uploadProcessed(this)">
         </label>
         <div class="hint-box">1. Stáhni fotky<br>2. Mac: pravý klik → Odstranit pozadí<br>3. Nahraj PNG zpět najednou</div>
+      <div id="dl-links" style="display:none;background:#fafafa;border:1px solid var(--b);border-radius:var(--r);padding:10px"></div>
       </div>
       <div id="prod-list"></div>
     </div>
@@ -427,30 +428,50 @@ async function downloadAll(){
     const idx=products.indexOf(p)+1;
     btn.textContent=`⏳ Stahuji ${i+1}/${ready.length}…`;
     try{
-      // Use allorigins proxy to bypass CORS for download
-      const proxy='https://api.allorigins.win/raw?url='+encodeURIComponent(p.imgUrl);
-      const r=await fetch(proxy,{signal:AbortSignal.timeout(10000)});
-      if(!r.ok) throw new Error('fetch fail');
-      const blob=await r.blob();
-      const ext=p.imgUrl.split('.').pop().split('?')[0]||'webp';
-      const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);
-      a.download=`produkt-${idx}.${ext}`;
-      a.style.display='none';
+      // Fetch via proxy then trigger download
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(p.imgUrl);
+      const resp = await fetch(proxyUrl, {signal: AbortSignal.timeout(15000)});
+      if(!resp.ok) throw new Error('fetch');
+      const blob = await resp.blob();
+      const ext = p.imgUrl.split('.').pop().split('?')[0] || 'webp';
+      const filename = `produkt-${idx}.${ext}`;
+      // Create object URL and trigger download
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      a.style.cssText = 'position:fixed;top:-100px;left:-100px;opacity:0';
       document.body.appendChild(a);
-      a.click();
-      await new Promise(r=>setTimeout(r,100));
+      a.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+      await new Promise(r => setTimeout(r, 1500));
       document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-      await new Promise(r=>setTimeout(r,700));
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      ok++;
     }catch(e){
       console.warn('Download failed:', idx, e);
+      fail++;
     }
   }
 
   btn.disabled=false;
   btn.textContent='⬇ Stáhnout fotky do počítače';
-  alert(`Staženo ${ready.length} fotek.\n\nNa Macu:\n1. Vyber všechny stažené soubory\n2. Pravý klik → Odstranit pozadí\n3. Klikni "Nahrát ořezané fotky"`);
+  if(ok > 0){
+    alert(`Staženo ${ok} fotek jako produkt-1, produkt-2 atd.\n\nNa Macu:\n1. Najdi je ve Stažených souborech\n2. Vyber všechny → pravý klik → Odstranit pozadí\n3. Nahraj PNG zpět do apky`);
+  } else {
+    // Fallback — show download links in panel
+    const dlDiv = document.getElementById('dl-links');
+    if(dlDiv){
+      dlDiv.style.display='block';
+      dlDiv.innerHTML = '<div class="fl" style="margin-bottom:6px">Ruční stažení fotek:</div>' +
+        ready.map((p,i)=>{
+          const idx=products.indexOf(p)+1;
+          const ext=p.imgUrl.split('.').pop().split('?')[0]||'webp';
+          return `<a href="${p.imgUrl}" download="produkt-${idx}.${ext}" target="_blank" 
+            style="display:block;font-size:11px;color:var(--red);margin-bottom:4px;word-break:break-all">
+            produkt-${idx}.${ext}</a>`;
+        }).join('');
+    }
+  }
 }
 
 // ─── UPLOAD PROCESSED IMAGES ─────────────────────────────
