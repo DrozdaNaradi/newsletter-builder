@@ -698,25 +698,31 @@ function buildEmailBody(){
     l.trim() ? `<div style="margin:0 0 7px">${esc(l)}</div>` : '<div style="margin:0 0 10px">&nbsp;</div>'
   ).join('');
 
-  const productsHtml = products.filter(p=>p.status==='done').map(p=>{
-    const imgSrc = p.imgNoBg || p.imgUrl || '';
-    return `
-<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:10px">
-<tr><td style="padding:28px 40px;background:#0a0a0a;border-radius:6px">
-  ${imgSrc?`<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-  <tr><td align="center" style="padding-bottom:14px">
-    <a href="${esc(p.url)}" style="text-decoration:none">
-      <img src="${esc(imgSrc)}" width="480" style="display:block;max-width:100%;height:auto;border-radius:${p.imgNoBg?'0':'4px'}" alt="${esc(p.name)}">
-    </a>
-  </td></tr></table>`:''}
-  <div style="text-align:center">
-    <a href="${esc(p.url)}" style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:20px;font-weight:700;color:#fff;text-decoration:underline;display:block;line-height:1.4">${esc(p.name)}</a>
-    ${p.popisek&&p.desc?`<div style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:14px;color:#9b9b9b;line-height:1.6;margin-top:8px">${esc(p.desc)}</div>`:''}
-  </div>
-</td></tr></table>`;
-  }).join('');
+  const doneProds = products.filter(p=>p.status==='done');
+  let productsHtml = '';
+  for(let pi=0; pi<doneProds.length; pi+=2){
+    const p1 = doneProds[pi];
+    const p2 = doneProds[pi+1]||null;
+    const cell = (p,w) => {
+      const src = p.imgNoBg||p.imgUrl||'';
+      const desc = p.popisek&&p.desc ? p.desc.split('\n').filter(l=>l.trim()).map(l=>`<div style="margin-bottom:3px">${l.trim()}</div>`).join('') : '';
+      return `<td width="${p2?'50%':'100%'}" style="padding:5px;vertical-align:top">
+<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+<tr><td style="padding:18px;background:#0a0a0a;border-radius:6px;vertical-align:top">
+  ${src?`<a href="${esc(p.url)}" style="text-decoration:none;display:block;margin-bottom:12px">
+    <img src="${esc(src)}" width="${w}" style="display:block;max-width:100%;height:180px;object-fit:contain;margin:0 auto" alt="${esc(p.name)}">
+  </a>`:''}
+  <a href="${esc(p.url)}" style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:${p2?'13':'16'}px;font-weight:700;color:#fff;text-decoration:underline;display:block;line-height:1.3;margin-bottom:${desc?'7px':'0'}">${esc(p.name)}</a>
+  ${desc?`<div style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:11px;color:#9b9b9b;line-height:1.6">${desc}</div>`:''}
+</td></tr></table></td>`;
+    };
+    productsHtml += `<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:4px"><tr>
+      ${cell(p1, p2?'260':'520')}
+      ${p2?cell(p2,'260'):''}
+    </tr></table>`;
+  }
 
-  const profeseHtml = showPro ? `
+    const profeseHtml = showPro ? `
 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:10px">
 <tr><td style="padding:24px 26px;background:#fff;border-radius:6px">
   <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation"><tr>
