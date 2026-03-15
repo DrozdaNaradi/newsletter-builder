@@ -372,25 +372,24 @@ function extractImgFromHtml(html){
 }
 
 async function scrapeProductPage(url){
-  const proxies=[
-    {type:'allorigins', url:'https://api.allorigins.win/get?url='+encodeURIComponent(url)},
-    {type:'corsproxy',  url:'https://corsproxy.io/?'+encodeURIComponent(url)},
+  // Try multiple approaches to get the page HTML
+  const fetchers=[
+    ()=>fetch('https://api.allorigins.win/get?url='+encodeURIComponent(url),{signal:AbortSignal.timeout(12000)})
+          .then(r=>r.json()).then(d=>d.contents||''),
+    ()=>fetch('https://corsproxy.io/?'+encodeURIComponent(url),{signal:AbortSignal.timeout(12000)})
+          .then(r=>r.text()),
+    ()=>fetch('https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(url),{signal:AbortSignal.timeout(12000)})
+          .then(r=>r.text()),
   ];
-  for(const proxy of proxies){
+
+  for(const fetcher of fetchers){
     try{
-      const resp=await fetch(proxy.url,{signal:AbortSignal.timeout(10000)});
-      if(!resp.ok)continue;
-      let html='';
-      if(proxy.type==='allorigins'){
-        const data=await resp.json();
-        html=data.contents||'';
-      } else {
-        html=await resp.text();
-      }
-      if(!html)continue;
+      const html=await fetcher();
+      if(!html||html.length<500)continue;
       const img=extractImgFromHtml(html);
+      console.log('Scraped img:', img, 'from html length:', html.length);
       if(img)return{img};
-    }catch(e){console.warn('Proxy failed:',proxy.type,e);}
+    }catch(e){console.warn('Fetcher failed:',e.message);}
   }
   return{img:''};
 }
@@ -398,15 +397,29 @@ async function scrapeProductPage(url){
 async function fetchProduct(i){
   const p=products[i];
   try{
-    const scraped=await scrapeProductPage(p.url);
-    p.imgUrl=scraped.img||'';
+    // Ask Claude for name, description AND image URL in one call
+    // Claude knows drozda-naradi.cz product image URL patterns
     const resp=await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
-        max_tokens:300,
-        system:`Vrať POUZE validní JSON bez backticks. Formát: {"name":"název","desc":"popisek"}. name: přesný obchodní název produktu ze slugu URL. desc: 1-2 věty odborného popisku česky pro profesionály.`,
+        max_tokens:400,
+        system:`Vrať POUZE validní JSON bez backticks.
+Formát: {"name":"název","desc":"popisek","img":"url_fotky"}
+
+- name: přesný obchodní název produktu (Milwaukee model + popis)
+- desc: 1-2 věty odborného popisku česky pro profesionály
+- img: URL titulní fotky produktu z drozda-naradi.cz
+  Fotky jsou na: https://www.drozda-naradi.cz/fotky92438/fotos/
+  Vzor souboru: _vyr_NNNNN_MODELSLUG--Hero_1.webp nebo .jpg
+  Příklady fungujících URL:
+  - https://www.drozda-naradi.cz/fotky92438/fotos/_vyr_17372_M12_FSCIWF38-0--Hero_1.webp
+  - https://www.drozda-naradi.cz/fotky92438/fotos/_vyr_17340_M18_FHACO540-122C--Hero_1.webp
+  - https://www.drozda-naradi.cz/fotky92438/fotos/_vyr_14128_M18_FVP5-0--Hero_1.jpg
+  - https://www.drozda-naradi.cz/fotky92438/fotos/_vyr_17373_Robustni-dilensky-pracovni-stul-CRAFTMAKER-Work-Station-T800-9.webp
+  Číslo NNNNN je interní ID produktu — odhadni ho z kontextu nebo z čísla v URL.
+  Pokud si nejsi jistý, dej "".`,
         messages:[{role:'user',content:`URL produktu: ${p.url}`}]
       })
     });
@@ -416,6 +429,18 @@ async function fetchProduct(i){
     const parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());
     p.name=parsed.name||slugToName(p.url);
     p.desc=parsed.desc||'';
+
+    // Try AI-suggested URL first, then scraping as fallback
+    let imgUrl=parsed.img||'';
+    if(imgUrl){
+      const ok=await checkImg(imgUrl);
+      if(!ok)imgUrl='';
+    }
+    if(!imgUrl){
+      const scraped=await scrapeProductPage(p.url);
+      imgUrl=scraped.img||'';
+    }
+    p.imgUrl=imgUrl;
     p.status='done';
   }catch(e){
     console.error(e);
