@@ -203,13 +203,16 @@ S pozdravem tým Drozda Nářadí.</textarea>
         <div id="pgt" style="font-size:11px;color:var(--t2);margin-top:4px;text-align:center"></div>
       </div>
       <div id="dl-wrap" style="display:none;flex-direction:column;gap:6px">
-        <button class="btn-blue" id="btn-dl" onclick="downloadAll()">⬇ Stáhnout fotky do počítače</button>
-        <label class="btn-green">
-          ⬆ Nahrát ořezané fotky (PNG)
-          <input type="file" id="file-upload" multiple accept="image/*" style="display:none" onchange="uploadProcessed(this)">
-        </label>
-        <div class="hint-box">1. Stáhni fotky<br>2. Mac: pravý klik → Odstranit pozadí<br>3. Nahraj PNG zpět najednou</div>
-      <div id="dl-links" style="display:none;background:#fafafa;border:1px solid var(--b);border-radius:var(--r);padding:10px"></div>
+        <div class="dropzone" id="dropzone"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="handleDrop(event)"
+          onclick="document.getElementById('drop-input').click()">
+          🖼 Pretáhni sem upravené fotky (nebo klikni)<br>
+          <span style="font-size:10px">Přiřadím podle obsahu automaticky</span>
+          <input type="file" id="drop-input" multiple accept="image/*" style="display:none" onchange="handleFiles(this.files)">
+        </div>
+        <div id="drop-result" style="display:none;font-size:11px;color:#16a34a;background:#f0fdf4;padding:8px 10px;border-radius:var(--r);line-height:1.8"></div>
       </div>
       <div id="prod-list"></div>
     </div>
@@ -647,6 +650,34 @@ function renderProdList(){
       </div>`:''}
     </div>`;
   }).join('');
+}
+
+// ─── EMAIL PRODUCT HELPERS ───────────────────────────────
+function _buildProductRow(p1, p2){
+  const w = p2 ? '50%' : '100%';
+  const pad = p2 ? 'padding:0 5px 0 0' : '';
+  return `<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="margin-bottom:10px">
+<tr>
+  <td width="${w}" style="${pad};vertical-align:top">${_buildProductCell(p1, p2?'285':'560')}</td>
+  ${p2?`<td width="50%" style="padding:0 0 0 5px;vertical-align:top">${_buildProductCell(p2,'285')}</td>`:''}
+</tr></table>`;
+}
+
+function _buildProductCell(p, imgW){
+  const imgSrc = p.imgNoBg || p.imgUrl || '';
+  const descHtml = p.popisek && p.desc
+    ? p.desc.split('\n').filter(l=>l.trim()).map(l=>
+        `<div style="margin-bottom:4px">${l.trim()}</div>`
+      ).join('')
+    : '';
+  return `<table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+<tr><td style="padding:18px;background:#0a0a0a;border-radius:6px;vertical-align:top">
+  ${imgSrc?`<a href="${esc(p.url)}" style="text-decoration:none;display:block;margin-bottom:12px">
+    <img src="${esc(imgSrc)}" width="${imgW}" style="display:block;max-width:100%;height:200px;object-fit:contain;margin:0 auto;border-radius:${p.imgNoBg?'0':'4px'}" alt="${esc(p.name)}">
+  </a>`:''}
+  <a href="${esc(p.url)}" style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:underline;display:block;line-height:1.3;margin-bottom:${descHtml?'8px':'0'}">${esc(p.name)}</a>
+  ${descHtml?`<div style="font-family:'Fira Sans',Helvetica,Arial,sans-serif;font-size:11px;color:#9b9b9b;line-height:1.6">${descHtml}</div>`:''}
+</td></tr></table>`;
 }
 
 // ─── BUILD EMAIL HTML ─────────────────────────────────────
